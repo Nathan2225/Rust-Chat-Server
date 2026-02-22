@@ -1,0 +1,24 @@
+# Rust
+
+# Compiled output
+/target
+backend/target
+
+# Rust build cache
+**/*.rs.bk
+**/*.pdb
+
+
+# OS Files
+.DS_Store
+Thumbs.db
+
+
+# VS Code
+.vscode/
+
+# Logs
+*.log
+
+# Environment variables
+.env
