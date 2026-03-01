@@ -1,31 +1,91 @@
 <!DOCTYPE html>
 <html>
-<body>
-<h2>WebSocket Test</h2>
+<head>
+    <title>Rust WebSocket Chat</title>
+</head>
 
-<input id="msg" placeholder="Type message">
-<button onclick="sendMessage()">Send</button>
+<body>
+
+<h2>Chat server</h2>
+
+<!-- username -->
+<div id="usernameSection">
+    <input id="usernameInput" placeholder="Enter username">
+    <button onclick="setUsername()">Join Chat</button>
+</div>
+
+<!-- chat -->
+<div id="chatSection" style="display:none;">
+    <input id="msg" placeholder="Type message">
+    <button onclick="sendMessage()">Send</button>
+</div>
 
 <ul id="messages"></ul>
 
 <script>
 const socket = new WebSocket("ws://localhost:3000/ws");
 
+let usernameSet = false;
+
+// connect to server
 socket.onopen = () => {
-    console.log("Connected!");
+    console.log("Connected to server");
 };
 
+// receive messages from server
 socket.onmessage = (event) => {
     const li = document.createElement("li");
     li.textContent = event.data;
     document.getElementById("messages").appendChild(li);
 };
 
+// user sets username
+function setUsername() {
+    const input = document.getElementById("usernameInput");
+    const username = input.value.trim();
+
+    if (username === "") return;
+
+    const message = {
+        type: "SetUsername",
+        data: username
+    };
+
+    socket.send(JSON.stringify(message));
+
+    usernameSet = true;
+
+    // hide username UI
+    document.getElementById("usernameSection").style.display = "none";
+
+    // show chat UI
+    document.getElementById("chatSection").style.display = "block";
+}
+
+// send chat message to server
 function sendMessage() {
+    if (!usernameSet) return;
+
     const input = document.getElementById("msg");
-    socket.send(input.value);
+    const text = input.value.trim();
+
+    if (text === "") return;
+
+    const message = {
+        type: "Chat",
+        data: text
+    };
+
+    socket.send(JSON.stringify(message));
     input.value = "";
 }
+
+// enter to send message
+document.getElementById("msg").addEventListener("keypress", function(e) {
+    if (e.key === "Enter") {
+        sendMessage();
+    }
+});
 </script>
 
 </body>

@@ -15,6 +15,15 @@ use tokio::sync::broadcast;
 //tcp listener to bind server to address
 use tokio::net::TcpListener;
 
+// for serializing and deserializing JSON messages
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(tag = "type", content = "data")]
+enum ClientMessage {
+    SetUsername(String),
+    Chat(String),
+}
 
 // * allow clients to send messages and see others *
 #[derive(Clone)]
@@ -24,7 +33,7 @@ struct AppState {
 
 // confirm running
 async fn root() -> &'static str {
-    "Rust Chat Server is Running"
+    "Chat Server is Running"
 }
 
 // handeler for client connection with web socket
@@ -63,12 +72,42 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
     // receive messages from client
     // read websocket messages and broadcast them
     let tx = state.tx.clone();
-    let mut recv_task = tokio::spawn(async move {
-        while let Some(Ok(Message::Text(text))) = receiver.next().await {
-            println!("Received: {}", text);
 
-            // convert Utf 8 Bytes to String and send
-            let _ = tx.send(text.to_string());
+    //handles incoming messages from client
+    let mut recv_task = tokio::spawn(async move {
+        let mut username: Option<String> = None;
+
+        // read messages from client
+        while let Some(Ok(Message::Text(text))) = receiver.next().await {
+
+            //parse JSON message
+            if let Ok(msg) = serde_json::from_str::<ClientMessage>(&text) {
+
+                match msg {
+
+                    // USERNAME HANDSHAKE
+                    ClientMessage::SetUsername(name) => {
+                        println!("Username set: {}", name);
+                        username = Some(name.clone());
+
+                        // Broadcast join message
+                        let join_msg = format!("{} joined", name);
+                        let _ = tx.send(join_msg);
+                    }
+
+                    // CHAT MESSAGE
+                    ClientMessage::Chat(message) => {
+                        if let Some(name) = &username {
+                            // Format message as "username: message"
+                            let formatted =
+                                format!("{}: {}", name, message);
+
+                            println!("Received: {}", formatted);
+                            let _ = tx.send(formatted);
+                        }
+                    }
+                }
+            }
         }
     });
 
