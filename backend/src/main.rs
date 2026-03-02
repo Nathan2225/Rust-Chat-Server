@@ -18,8 +18,10 @@ use tokio::sync::{mpsc, Mutex};
 
 //allows sending and recieving messages
 use futures_util::{SinkExt, StreamExt};
+
 //allows multiple clients to see the same content broadcasted
 //use tokio::sync::broadcast;
+
 //tcp listener to bind server to address
 use tokio::net::TcpListener;
 
@@ -52,20 +54,21 @@ struct AppState {
 }
 
 struct ServerState {
-    // client info
+    //client info
     clients: HashMap<ClientId, Client>,
-    // room name and set of client ids in that room
+    //room info
     rooms: HashMap<String, HashSet<ClientId>>,
-    // used to assign unique ids to clients
+    //used to assign unique ids to clients
     next_id: ClientId,
 }
 
-// confirm running
+//confirm running
 async fn root() -> &'static str {
     "Chat Server is Running"
 }
 
 // handeler for client connection with web socket
+//https://docs.rs/axum/latest/axum/extract/ws/
 async fn ws_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
@@ -73,7 +76,14 @@ async fn ws_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
+
+
+
 // * web socket logic *
+// references used: 
+// https://websocket.org/guides/languages/rust/ 
+// https://docs.rs/axum/latest/axum/extract/ws/
+//https://docs.rs/axum/latest/axum/extract/ws/
 //handels communication for a client
 async fn handle_socket(stream: WebSocket, state: AppState) {
     println!("Client connected!");
@@ -83,7 +93,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
     // channel used to send messages TO this client
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
 
-    // forward server messages → websocket
+    // forwards server messages https://websocket.org/guides/languages/rust/
     tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if ws_sender.send(Message::Text(msg.into())).await.is_err() {
@@ -103,7 +113,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
     // store username
     let mut username: Option<String> = None;
 
-    // receive messages from client
+    // receive messages from client https://websocket.org/guides/languages/rust/
     while let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
 
         if let Ok(msg) = serde_json::from_str::<ClientMessage>(&text) {
@@ -154,6 +164,8 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
         }
     }
 
+
+
     // disconnect cleanup
     if let Some(name) = username {
         let mut state = state.inner.lock().await;
@@ -174,6 +186,8 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
 
     println!("Client disconnected");
 }
+
+
 
 
 // helper to send a message to all clients in a room
@@ -199,9 +213,6 @@ async fn main() {
     //for logging and tracing output
     tracing_subscriber::fmt::init();
 
-    //broadcast channel
-    //send messages with capacity of 100
-    //let (tx, _) = broadcast::channel(100);
 
     // stored as shared application state
     let state = AppState {
@@ -227,7 +238,7 @@ async fn main() {
 
     println!("Server running at http://{}", addr);
 
-    //TCP listener fro address
+    //TCP listener for address
     let listener = TcpListener::bind(addr)
         .await
         .unwrap();
