@@ -7,6 +7,7 @@
 <body>
 
 <h2>Chat server</h2>
+<div id="roomInfo">channel: <b>general</b></div>
 
 <!-- username -->
 <div id="usernameSection">
@@ -15,17 +16,30 @@
 </div>
 
 <!-- chat -->
-<div id="chatSection" style="display:none;">
+<div id="chatSection" style="display:none; margin-top:10px;">
     <input id="msg" placeholder="Type message">
     <button onclick="sendMessage()">Send</button>
 </div>
 
-<ul id="messages"></ul>
+<ul id="messages" style="
+    height:300px;
+    overflow-y:auto;
+    border:1px solid black;
+    padding:10px;
+    list-style-type:none;
+"></ul>
 
 <script>
 const socket = new WebSocket("ws://localhost:3000/ws");
 
 let usernameSet = false;
+
+document.getElementById("usernameInput")
+.addEventListener("keypress", function(e) {
+    if (e.key === "Enter") {
+        setUsername();
+    }
+});
 
 // connect to server
 socket.onopen = () => {
@@ -34,9 +48,15 @@ socket.onopen = () => {
 
 // receive messages from server
 socket.onmessage = (event) => {
+    const messages = document.getElementById("messages");
+
     const li = document.createElement("li");
     li.textContent = event.data;
-    document.getElementById("messages").appendChild(li);
+
+    messages.appendChild(li);
+
+    // auto scroll to newest message
+    messages.scrollTop = messages.scrollHeight;
 };
 
 // user sets username
@@ -64,7 +84,7 @@ function setUsername() {
 
 // send chat message to server
 function sendMessage() {
-    if (!usernameSet) return;
+    if (!usernameSet || socket.readyState !== WebSocket.OPEN) return;
 
     const input = document.getElementById("msg");
     const text = input.value.trim();

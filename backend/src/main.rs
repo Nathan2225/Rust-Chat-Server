@@ -8,10 +8,18 @@ use axum::{
     routing::get,
     Router,
 };
+
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
+
+use tokio::sync::{mpsc, Mutex};
+
 //allows sending and recieving messages
 use futures_util::{SinkExt, StreamExt};
 //allows multiple clients to see the same content broadcasted
-use tokio::sync::broadcast;
+//use tokio::sync::broadcast;
 //tcp listener to bind server to address
 use tokio::net::TcpListener;
 
@@ -25,10 +33,31 @@ enum ClientMessage {
     Chat(String),
 }
 
+//client identifier type
+type ClientId = usize;
+
+// * client info and app state * //
+#[derive(Clone)]
+struct Client {
+    username: String,
+    sender: mpsc::UnboundedSender<String>,
+    room: String,
+}
+
+
 // * allow clients to send messages and see others *
 #[derive(Clone)]
 struct AppState {
-    tx: broadcast::Sender<String>,
+    inner: Arc<Mutex<ServerState>>,
+}
+
+struct ServerState {
+    // client info
+    clients: HashMap<ClientId, Client>,
+    // room name and set of client ids in that room
+    rooms: HashMap<String, HashSet<ClientId>>,
+    // used to assign unique ids to clients
+    next_id: ClientId,
 }
 
 // confirm running
@@ -49,76 +78,120 @@ async fn ws_handler(
 async fn handle_socket(stream: WebSocket, state: AppState) {
     println!("Client connected!");
 
-    //splits web socket into sender and receiver
-    let (mut sender, mut receiver) = stream.split();
+    let (mut ws_sender, mut ws_receiver) = stream.split();
 
-    // subscribes client to broadcast channel
-    let mut rx = state.tx.subscribe();
+    // channel used to send messages TO this client
+    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
 
-    //send messages to client
-    //forwards messages from channel to web socket client
-    let mut send_task = tokio::spawn(async move {
-        while let Ok(msg) = rx.recv().await {
-            if sender
-                .send(Message::Text(msg.into()))
-                .await
-                .is_err()
-            {
+    // forward server messages → websocket
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if ws_sender.send(Message::Text(msg.into())).await.is_err() {
                 break;
             }
         }
     });
 
+    // assign client id
+    let client_id = {
+        let mut state = state.inner.lock().await;
+        let id = state.next_id;
+        state.next_id += 1;
+        id
+    };
+
+    // store username
+    let mut username: Option<String> = None;
+
     // receive messages from client
-    // read websocket messages and broadcast them
-    let tx = state.tx.clone();
+    while let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
 
-    //handles incoming messages from client
-    let mut recv_task = tokio::spawn(async move {
-        let mut username: Option<String> = None;
+        if let Ok(msg) = serde_json::from_str::<ClientMessage>(&text) {
 
-        // read messages from client
-        while let Some(Ok(Message::Text(text))) = receiver.next().await {
+            match msg {
 
-            //parse JSON message
-            if let Ok(msg) = serde_json::from_str::<ClientMessage>(&text) {
+                // * username logic *
+                ClientMessage::SetUsername(name) => {
+                    username = Some(name.clone());
 
-                match msg {
+                    let mut state = state.inner.lock().await;
 
-                    // USERNAME HANDSHAKE
-                    ClientMessage::SetUsername(name) => {
-                        println!("Username set: {}", name);
-                        username = Some(name.clone());
+                    let client = Client {
+                        username: name.clone(),
+                        sender: tx.clone(),
+                        room: "general".to_string(),
+                    };
 
-                        // Broadcast join message
-                        let join_msg = format!("{} joined", name);
-                        let _ = tx.send(join_msg);
-                    }
+                    state.clients.insert(client_id, client);
+                    state.rooms
+                        .get_mut("general")
+                        .unwrap()
+                        .insert(client_id);
 
-                    // CHAT MESSAGE
-                    ClientMessage::Chat(message) => {
-                        if let Some(name) = &username {
-                            // Format message as "username: message"
-                            let formatted =
-                                format!("{}: {}", name, message);
+                    broadcast_to_room(
+                        &state,
+                        "general",
+                        format!("{} joined", name),
+                    );
+                }
 
-                            println!("Received: {}", formatted);
-                            let _ = tx.send(formatted);
-                        }
+                // * chat logic *
+                ClientMessage::Chat(message) => {
+                    if let Some(name) = &username {
+                        let state = state.inner.lock().await;
+
+                        let client = state.clients.get(&client_id).unwrap();
+                        let room = &client.room;
+
+                        broadcast_to_room(
+                            &state,
+                            room,
+                            format!("{}: {}", name, message),
+                        );
                     }
                 }
             }
         }
-    });
-
-    // wait for sending or receiving to stop
-    tokio::select! {
-        _ = (&mut send_task) => recv_task.abort(),
-        _ = (&mut recv_task) => send_task.abort(),
     }
-    //print when ending
+
+    // disconnect cleanup
+    if let Some(name) = username {
+        let mut state = state.inner.lock().await;
+
+        // remove client from state
+        if let Some(client) = state.clients.remove(&client_id) {
+            if let Some(room) = state.rooms.get_mut(&client.room) {
+                room.remove(&client_id);
+            }
+
+            broadcast_to_room(
+                &state,
+                &client.room,
+                format!("{} left", name),
+            );
+        }
+    }
+
     println!("Client disconnected");
 }
+
+
+// helper to send a message to all clients in a room
+fn broadcast_to_room(
+    state: &ServerState,
+    room: &str,
+    message: String,
+) {
+    if let Some(clients) = state.rooms.get(room) {
+        for client_id in clients {
+            if let Some(client) = state.clients.get(client_id) {
+                let _ = client.sender.send(message.clone());
+            }
+        }
+    }
+}
+
+
 
 // main async tokio
 #[tokio::main]
@@ -128,10 +201,20 @@ async fn main() {
 
     //broadcast channel
     //send messages with capacity of 100
-    let (tx, _) = broadcast::channel(100);
+    //let (tx, _) = broadcast::channel(100);
 
     // stored as shared application state
-    let state = AppState { tx };
+    let state = AppState {
+        inner: Arc::new(Mutex::new(ServerState {
+            clients: HashMap::new(),
+            rooms: {
+                let mut r = HashMap::new();
+                r.insert("general".to_string(), HashSet::new());
+                r
+            },
+            next_id: 0,
+        })),
+    };
 
     //set router
     let app = Router::new()
