@@ -2,12 +2,17 @@
 <html>
 <head>
     <title>Rust WebSocket Chat</title>
+
+    <!-- CSS ref -->
+    <link rel="stylesheet" href="styles.css">
 </head>
 
 <body>
 
-<h2>Chat server</h2>
-<div id="roomInfo">channel: <b>general</b></div>
+<header>
+    <h2>Chat server</h2>
+    <div id="roomInfo">channel: <b>general</b></div>
+</header>
 
 <!-- username -->
 <div id="usernameSection">
@@ -15,98 +20,20 @@
     <button onclick="setUsername()">Join Chat</button>
 </div>
 
-<!-- chat -->
-<div id="chatSection" style="display:none; margin-top:10px;">
-    <input id="msg" placeholder="Type message">
-    <button onclick="sendMessage()">Send</button>
+<div id="chatContainer">
+
+    <ul id="messages"></ul>
+
+    <!-- message bar -->
+    <div id="chatSection">
+        <input id="msg" placeholder="Type message">
+        <button onclick="sendMessage()">Send</button>
+    </div>
+
 </div>
 
-<ul id="messages" style="
-    height:300px;
-    overflow-y:auto;
-    border:1px solid black;
-    padding:10px;
-    list-style-type:none;
-"></ul>
-
-<script>
-const socket = new WebSocket("ws://localhost:3000/ws");
-
-let usernameSet = false;
-
-document.getElementById("usernameInput")
-.addEventListener("keypress", function(e) {
-    if (e.key === "Enter") {
-        setUsername();
-    }
-});
-
-// connect to server
-socket.onopen = () => {
-    console.log("Connected to server");
-};
-
-// receive messages from server
-socket.onmessage = (event) => {
-    const messages = document.getElementById("messages");
-
-    const li = document.createElement("li");
-    li.textContent = event.data;
-
-    messages.appendChild(li);
-
-    // auto scroll to newest message
-    messages.scrollTop = messages.scrollHeight;
-};
-
-// user sets username
-function setUsername() {
-    const input = document.getElementById("usernameInput");
-    const username = input.value.trim();
-
-    if (username === "") return;
-
-    const message = {
-        type: "SetUsername",
-        data: username
-    };
-
-    socket.send(JSON.stringify(message));
-
-    usernameSet = true;
-
-    // hide username UI
-    document.getElementById("usernameSection").style.display = "none";
-
-    // show chat UI
-    document.getElementById("chatSection").style.display = "block";
-}
-
-// send chat message to server
-function sendMessage() {
-    if (!usernameSet || socket.readyState !== WebSocket.OPEN) return;
-
-    const input = document.getElementById("msg");
-    const text = input.value.trim();
-
-    if (text === "") return;
-
-    const message = {
-        type: "Chat",
-        data: text
-    };
-
-    socket.send(JSON.stringify(message));
-    input.value = "";
-}
-
-// enter to send message
-document.getElementById("msg").addEventListener("keypress", function(e) {
-    if (e.key === "Enter") {
-        sendMessage();
-    }
-});
-</script>
+<!-- JavaScript reference -->
+<script src="chat.js"></script>
 
 </body>
 </html>
