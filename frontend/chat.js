@@ -26,13 +26,23 @@ document.getElementById("msg")
 });
 
 // connect to server
-socket.onopen = () => {
-    console.log("Connected to server");
-};
-
-// receive messages
 socket.onmessage = (event) => {
 
+    // parse JSON
+    try {
+        const data = JSON.parse(event.data);
+
+        // handle room list updates
+        if (data.type === "RoomList") {
+            updateRoomList(data.data);
+            return; // skip normal chat logic for this message
+        }
+
+    } catch (e) {
+        // treat as normal chat message
+    }
+
+    // *** normal chat message logic ***
     const messages = document.getElementById("messages");
     const li = document.createElement("li");
 
@@ -52,7 +62,6 @@ socket.onmessage = (event) => {
     }
 
     messages.appendChild(li);
-
     messages.scrollTop = messages.scrollHeight;
 };
 
@@ -70,6 +79,10 @@ function setUsername() {
     }));
 
     usernameSet = true;
+
+    socket.send(JSON.stringify({
+        type: "GetRooms"
+    }));
 
     document.getElementById("usernameSection").style.display = "none";
     document.getElementById("chatSection").style.display = "flex";
@@ -116,4 +129,43 @@ function sendMessage() {
     }));
 
     input.value = "";
+}
+
+// update room list in sidebar
+function updateRoomList(rooms) {
+
+    const list = document.getElementById("roomList");
+
+    if (!list) return; 
+
+    list.innerHTML = "";
+
+    rooms.forEach(room => {
+        const li = document.createElement("li");
+
+        li.textContent = "# " + room;
+
+        li.onclick = () => {
+            joinRoomFromSidebar(room);
+        };
+
+        list.appendChild(li);
+    });
+}
+
+// join room when clicking from sidebar
+function joinRoomFromSidebar(roomName) {
+
+    if (!usernameSet) return;
+
+    socket.send(JSON.stringify({
+        type: "JoinRoom",
+        data: roomName
+    }));
+
+    currentRoom = roomName;
+
+    document.getElementById("currentRoom").textContent = roomName;
+
+    document.getElementById("messages").innerHTML = "";
 }

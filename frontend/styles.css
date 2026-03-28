@@ -50,7 +50,6 @@ h2 {
     padding: 12px;
     background-color: #383a40;
     border-top: 1px solid #1e1f22;
-    display: flex;
     gap: 10px;
 }
 
@@ -92,6 +91,72 @@ button:hover {
 
 #roomSection button {
     margin-left: 6px;
+}
+
+/* layout container */
+#app {
+    display: flex;
+    height: 100vh;
+}
+
+/* sidebar */
+#sidebar {
+    width: 220px;
+    background-color: #2b2d31;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* sidebar title */
+#sidebar h3 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    font-size: 14px;
+    color: #b5bac1;
+}
+
+/* room list */
+#roomList {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    flex: 1;
+}
+
+/* room item */
+#roomList li {
+    padding: 8px;
+    border-radius: 5px;
+    cursor: pointer;
+    color: #dcddde;
+}
+
+#roomList li:hover {
+    background-color: #3a3c43;
+}
+
+/* create room section */
+#createRoomSection {
+    display: flex;
+    gap: 5px;
+    margin-top: 10px;
+}
+
+#createRoomSection input {
+    flex: 1;
+    padding: 6px;
+}
+
+#createRoomSection button {
+    padding: 6px 10px;
+}
+
+/* main chat area */
+#main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
 }
 
 

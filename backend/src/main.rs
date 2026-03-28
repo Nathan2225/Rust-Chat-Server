@@ -34,7 +34,16 @@ enum ClientMessage {
     SetUsername(String),
     Chat(String),
     JoinRoom(String),
+    GetRooms, // NEW
 }
+
+
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "type", content = "data")]
+enum ServerMessage {
+    RoomList(Vec<String>),
+}
+
 
 //client identifier type
 type ClientId = usize;
@@ -144,6 +153,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                         "general",
                         format!("{} joined", name),
                     );
+                    broadcast_room_list(&state);
                 }
 
                 // * chat logic *
@@ -203,7 +213,23 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                         &new_room,
                         format!("{} joined {}", username, new_room),
                     );
+                    broadcast_room_list(&state);
                 }
+
+
+                // * room list logic *
+                ClientMessage::GetRooms => {
+                    let state = state.inner.lock().await;
+
+                    let rooms: Vec<String> = state.rooms.keys().cloned().collect();
+
+                    if let Some(client) = state.clients.get(&client_id) {
+                        let _ = client.sender.send(
+                            serde_json::to_string(&ServerMessage::RoomList(rooms)).unwrap()
+                        );
+                    }
+                }
+
             }
         }
     }
@@ -225,6 +251,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                 &client.room,
                 format!("{} left", name),
             );
+            broadcast_room_list(&state);
         }
     }
 
@@ -249,6 +276,19 @@ fn broadcast_to_room(
     }
 }
 
+
+// helper to send updated room list to all clients
+fn broadcast_room_list(state: &ServerState) {
+    let rooms: Vec<String> = state.rooms.keys().cloned().collect();
+
+    let msg = serde_json::to_string(
+        &ServerMessage::RoomList(rooms)
+    ).unwrap();
+
+    for client in state.clients.values() {
+        let _ = client.sender.send(msg.clone());
+    }
+}
 
 
 // main async tokio

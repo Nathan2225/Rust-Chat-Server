@@ -8,31 +8,46 @@
 
 <body>
 
-<header>
-    <h2>Chat server</h2>
-    <div id="roomInfo">channel: <b id="currentRoom">general</b></div>
-</header>
+<div id="app">
 
-<!-- username -->
-<div id="usernameSection">
-    <input id="usernameInput" placeholder="Enter username">
-    <button onclick="setUsername()">Join Chat</button>
-</div>
+    <!-- side bar -->
+    <div id="sidebar">
+        <h3>Channels</h3>
+        <ul id="roomList"></ul>
 
-<!-- room join -->
-<div id="roomSection">
-    <input id="roomInput" placeholder="Enter room name">
-    <button onclick="joinRoom()">Join Room</button>
-</div>
+        <!-- create room -->
+        <div id="createRoomSection">
+            <input id="roomInput" placeholder="New room name">
+            <button onclick="joinRoom()">Create</button>
+        </div>
+    </div>
 
-<div id="chatContainer">
+    <!-- Main Chat -->
+    <div id="main">
 
-    <ul id="messages"></ul>
+        <header>
+            <h2>Chat server</h2>
+            <div id="roomInfo">channel: <b id="currentRoom">general</b></div>
+        </header>
 
-    <!-- message bar -->
-    <div id="chatSection">
-        <input id="msg" placeholder="Type message">
-        <button onclick="sendMessage()">Send</button>
+        <!-- username -->
+        <div id="usernameSection">
+            <input id="usernameInput" placeholder="Enter username">
+            <button onclick="setUsername()">Join Chat</button>
+        </div>
+
+        <div id="chatContainer">
+
+            <ul id="messages"></ul>
+
+            <!-- message bar -->
+            <div id="chatSection">
+                <input id="msg" placeholder="Type message">
+                <button onclick="sendMessage()">Send</button>
+            </div>
+
+        </div>
+
     </div>
 
 </div>
