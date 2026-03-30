@@ -1,3 +1,5 @@
+
+
 // axum for routing, requests, and WebSocket support.
 use axum::{
     extract::{
@@ -8,6 +10,9 @@ use axum::{
     routing::get,
     Router,
 };
+
+use dotenvy::dotenv;
+use std::env;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -59,9 +64,12 @@ struct Client {
 
 
 // * allow clients to send messages and see others *
+use sqlx::PgPool;
+
 #[derive(Clone)]
 struct AppState {
     inner: Arc<Mutex<ServerState>>,
+    db: PgPool,
 }
 
 struct ServerState {
@@ -139,10 +147,25 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                 ClientMessage::SetUsername(name) => {
                     username = Some(name.clone());
 
+                    // insert user into DB
+                    let db = state.db.clone();
+                    let name_clone = name.clone();
+
+                    tokio::spawn(async move {
+                    let _ = sqlx::query!(
+                            "INSERT INTO users (username, password_hash)
+                            VALUES ($1, 'temp')
+                            ON CONFLICT (username) DO NOTHING",
+                            name_clone
+                        )
+                        .execute(&db)
+                        .await;
+                    });
+
                     let mut state = state.inner.lock().await;
 
                     let client = Client {
-                        username: name.clone(),
+                    username: name.clone(),
                         sender: tx.clone(),
                         server: "main".to_string(),
                         channel: "general".to_string(),
@@ -165,20 +188,63 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                         "general",
                         format!("{} joined", name),
                     );
+
                     broadcast_room_list(&state);
                 }
 
                 // * chat logic *
                 ClientMessage::Chat(message) => {
                     if let Some(name) = &username {
-                        let state = state.inner.lock().await;
+                        let state_lock = state.inner.lock().await;
 
-                        let client = state.clients.get(&client_id).unwrap();
+                        let client = state_lock.clients.get(&client_id).unwrap();
                         let server_name = &client.server;
                         let channel = &client.channel;
 
+                        //save message to DB
+                        let db = state.db.clone();
+                        let message_clone = message.clone();
+                        let username_clone = name.clone();
+                        let channel_clone = channel.clone();
+
+                        tokio::spawn(async move {
+                            // get user_id
+                            let user = sqlx::query!(
+                                "SELECT user_id FROM users WHERE username = $1",
+                            username_clone
+                            )
+                            .fetch_optional(&db)
+                            .await
+                            .ok()
+                            .flatten();
+
+                            if let Some(user) = user {
+                                // get channel_id
+                                let channel_row = sqlx::query!(
+                                "SELECT channel_id FROM channels WHERE channel_name = $1",
+                                    channel_clone
+                                )
+                                .fetch_optional(&db)
+                                .await
+                                .ok()
+                                .flatten();
+
+                                if let Some(channel_row) = channel_row {
+                                    let _ = sqlx::query!(
+                                        "INSERT INTO messages (channel_mes, user_mes, message_content)
+                                        VALUES ($1, $2, $3)",
+                                        channel_row.channel_id,
+                                        user.user_id,
+                                        message_clone
+                                    )
+                                .execute(&db)
+                                    .await;
+                                }
+                            }
+                        });
+
                         broadcast_to_channel(
-                            &state,
+                            &state_lock,
                             server_name,
                             channel,
                             format!("{}: {}", name, message),
@@ -189,6 +255,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
 
                 // * room logic *
                 ClientMessage::JoinRoom(new_channel) => {
+                    let db = state.db.clone();
                     let mut state = state.inner.lock().await;
 
                     let (server_name, old_channel, username) =
@@ -208,6 +275,29 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                             channel.remove(&client_id);
                         }
                     }
+
+
+                    //insert channel into DB if not exists
+                    let db_clone = db.clone();
+                    let channel_name_clone = new_channel.clone();
+
+                    tokio::spawn(async move {
+                        let _ = sqlx::query!(
+                            r#"
+                            INSERT INTO channels (server_channel, channel_name)
+                            VALUES (
+                                (SELECT server_id FROM servers WHERE name_server = 'main'),
+                                $1
+                            )
+                            ON CONFLICT (server_channel, channel_name) DO NOTHING
+                            "#,
+                            channel_name_clone
+                        )
+                        .execute(&db_clone)
+                        .await;
+                    });
+
+
 
                     // add to new channel
                     if let Some(server) = state.servers.get_mut(&server_name) {
@@ -237,24 +327,85 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                         &new_channel,
                         format!("{} joined {}", username, new_channel),
                     );
+
+
+                    //Load previous messages from DB
+                    
+                    let channel_name = new_channel.clone();
+                    let sender = {
+                        if let Some(client) = state.clients.get(&client_id) {
+                            client.sender.clone()
+                        } else {
+                            return;
+                        }
+                    };
+
+                    tokio::spawn(async move {
+                        let messages = sqlx::query!(
+                            r#"
+                            SELECT m.message_content, u.username
+                            FROM messages m
+                            JOIN users u ON m.user_mes = u.user_id
+                            JOIN channels c ON m.channel_mes = c.channel_id
+                            WHERE c.channel_name = $1
+                            ORDER BY m.created_at ASC
+                            "#,
+                            channel_name
+                        )
+                        .fetch_all(&db)
+                        .await;
+
+                        if let Ok(messages) = messages {
+                            for msg in messages {
+                                let formatted = format!(
+                                    "{}: {}",
+                                    msg.username,
+                                    msg.message_content
+                                );
+                                let _ = sender.send(formatted);
+                            }
+                        }
+                    });
                 }
 
 
                 // * room list logic *
                 ClientMessage::GetRooms => {
-                    let state = state.inner.lock().await;
+                    let db = state.db.clone();
 
-                    let channels: Vec<String> = if let Some(server) = state.servers.get("main") {
-                        server.channels.keys().cloned().collect()
-                    } else {
-                        vec![]
+                    let sender = {
+                        let state = state.inner.lock().await;
+                        if let Some(client) = state.clients.get(&client_id) {
+                            client.sender.clone()
+                        } else {
+                            return;
+                        }
                     };
 
-                    if let Some(client) = state.clients.get(&client_id) {
-                        let _ = client.sender.send(
-                            serde_json::to_string(&ServerMessage::RoomList(channels)).unwrap()
-                        );
-                    }
+                    tokio::spawn(async move {
+                        let channels = sqlx::query!(
+                            r#"
+                            SELECT channel_name
+                            FROM channels
+                            WHERE server_channel = (
+                                SELECT server_id FROM servers WHERE name_server = 'main'
+                            )
+                            "#
+                        )
+                        .fetch_all(&db)
+                        .await;
+
+                        if let Ok(rows) = channels {
+                            let channel_list: Vec<String> =
+                                rows.into_iter().map(|r| r.channel_name).collect();
+
+                            let msg = serde_json::to_string(
+                                &ServerMessage::RoomList(channel_list)
+                            ).unwrap();
+
+                            let _ = sender.send(msg);
+                        }
+                    });
                 }
 
             }
@@ -336,8 +487,19 @@ async fn main() {
     tracing_subscriber::fmt::init();
 
 
+    dotenv().ok();
+
+    let database_url = env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set");
+
+    let db = PgPool::connect(&database_url)
+        .await
+        .expect("Failed to connect to DB");
+
+
     // stored as shared application state
     let state = AppState {
+        db,
         inner: Arc::new(Mutex::new(ServerState {
             clients: HashMap::new(),
             servers: {
