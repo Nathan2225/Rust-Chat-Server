@@ -44,9 +44,21 @@
         </header>
 
         <!-- username -->
-        <div id="usernameSection">
-            <input id="usernameInput" placeholder="Enter username">
-            <button onclick="setUsername()">Join Chat</button>
+        <div id="authSection">
+
+            <h2>Login</h2>
+            <input id="loginUsername" placeholder="Username">
+            <input id="loginPassword" type="password" placeholder="Password">
+            <button onclick="login()">Login</button>
+
+            <hr>
+
+            <h2>Sign Up</h2>
+            <input id="signupUsername" placeholder="Username">
+            <input id="signupEmail" placeholder="Email">
+            <input id="signupPassword" type="password" placeholder="Password">
+            <button onclick="signup()">Sign Up</button>
+
         </div>
 
         <div id="chatContainer">
@@ -54,7 +66,7 @@
             <ul id="messages"></ul>
 
             <!-- message bar -->
-            <div id="chatSection">
+            <div id="chatSection" style="display:none;">
                 <input id="msg" placeholder="Type message">
                 <button onclick="sendMessage()">Send</button>
             </div>

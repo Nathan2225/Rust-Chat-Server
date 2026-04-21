@@ -36,6 +36,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", content = "data")]
 enum ClientMessage {
+    // existing
     SetUsername(String),
     Chat(String),
     JoinRoom(String),
@@ -44,6 +45,10 @@ enum ClientMessage {
     JoinServer(String),
     GetServers,
     SwitchServer(i32),
+
+    // authentication
+    Login { username: String, password: String },
+    Signup { username: String, email: String, password: String },
 }
 
 
@@ -51,16 +56,28 @@ enum ClientMessage {
 #[serde(tag = "type", content = "data")]
 enum ServerMessage {
     RoomList(Vec<String>),
-    ServerList(Vec<(i32, String)>), // (server_id, server_name)
+    ServerList(Vec<(i32, String)>),
+
+    // auth
+    AuthSuccess,
+    AuthError(String),
 }
 
 
 //client identifier type
 type ClientId = usize;
 
+
+#[derive(Clone)]
+struct AuthUser {
+    user_id: i32,
+    username: String,
+}
+
 // * client info and app state * //
 #[derive(Clone)]
 struct Client {
+    user_id: i32,
     username: String,
     sender: mpsc::UnboundedSender<String>,
     server_id: i32, // tracks which server the client is in   
@@ -141,82 +158,46 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
     // store username
     let mut username: Option<String> = None;
 
+    let mut auth_user: Option<AuthUser> = None;
+
     // receive messages from client https://websocket.org/guides/languages/rust/
     while let Some(Ok(Message::Text(text))) = ws_receiver.next().await {
 
         if let Ok(msg) = serde_json::from_str::<ClientMessage>(&text) {
 
+
+            // blocks everything except Login/Signup from working if not authenticated
+            if auth_user.is_none() {
+                match &msg {
+                    ClientMessage::Login { .. } | ClientMessage::Signup { .. } => {}
+                    _ => {
+                        let msg = serde_json::to_string(
+                            &ServerMessage::AuthError("Please log in first".to_string())
+                        ).unwrap();
+
+                        let _ = tx.send(msg);
+                        continue;
+                    }
+                }
+            }
+
             match msg {
 
-                // * username logic *
-                ClientMessage::SetUsername(name) => {
-                    username = Some(name.clone());
 
-                    // insert user into DB
-                    let db = state.db.clone();
-                    let name_clone = name.clone();
-                    let state_outer = state.clone();
+                ClientMessage::SetUsername(_) => {
+                    let msg = serde_json::to_string(
+                        &ServerMessage::AuthError("Use login/signup instead".to_string())
+                    ).unwrap();
 
-                    tokio::spawn(async move {
-                    let _ = sqlx::query!(
-                            "INSERT INTO users (username, password_hash)
-                            VALUES ($1, 'temp')
-                            ON CONFLICT (username) DO NOTHING",
-                            name_clone
-                        )
-                        .execute(&db)
-                        .await;
-                    });
-
-                    let mut state = state.inner.lock().await;
-
-                    let db = state_outer.db.clone();
-
-                    let server_row: _ = sqlx::query!(
-                        "SELECT server_id FROM servers WHERE name_server = 'main'"
-                    )
-                    .fetch_one(&db)
-                    .await
-                    .unwrap();
-
-                    let client = Client {
-                        username: name.clone(),
-                        sender: tx.clone(),
-                        server_id: server_row.server_id,
-                        channel: "general".to_string(),
-                    };
-
-                    state.clients.insert(client_id, client);
-
-                    // add to default server/channel
-                    let server_key = server_row.server_id.to_string();
-
-                    state.servers
-                        .entry(server_key.clone())
-                        .or_insert(Server {
-                            channels: HashMap::new(),
-                        })
-                        .channels
-                        .entry("general".to_string())
-                        .or_insert_with(HashSet::new)
-                        .insert(client_id);
-
-                    let server_key = server_row.server_id.to_string();
-
-                    broadcast_to_channel(
-                        &state,
-                        &server_key,
-                        "general",
-                        format!("{} joined", name),
-                    );
-
-                    broadcast_room_list(&state);
+                    let _ = tx.send(msg);
                 }
 
-
+                
                 // * server logic *
                 ClientMessage::CreateServer(server_name) => {
-                    if let Some(username) = &username {
+                    if let Some(user) = &auth_user {
+                    let username = &user.username;
+                    let user_id = user.user_id;
                     let db = state.db.clone();
 
                     // generate random server code
@@ -231,14 +212,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
 
                     // create server and membership
                     let result = tokio::spawn(async move {
-                        // get user_id
-                        let user = sqlx::query!(
-                            "SELECT user_id FROM users WHERE username = $1",
-                            username_clone
-                        )
-                        .fetch_one(&db)
-                        .await
-                        .ok()?;
+                        
 
                         // insert server
                         let server = sqlx::query!(
@@ -248,7 +222,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                             RETURNING server_id
                             "#,
                             server_name_clone,
-                            user.user_id,
+                            user_id,
                             server_code
                         )
                         .fetch_one(&db)
@@ -275,7 +249,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                             INSERT INTO server_members (user_mem, server_mem)
                             VALUES ($1, $2)
                             "#,
-                            user.user_id,
+                            user_id,
                             server.server_id
                         )
                         .execute(&db)
@@ -305,28 +279,61 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                             .or_insert_with(HashSet::new)
                             .insert(client_id);
                         }
+
+                        // send updated server list to client
+                        let sender = {
+                            let state_lock = state.inner.lock().await;
+                            if let Some(client) = state_lock.clients.get(&client_id) {
+                                client.sender.clone()
+                            } else {
+                                return;
+                            }
+                        };
+
+                        let db_clone = state.db.clone();
+                        let user_id = user_id; // already available above
+
+                        tokio::spawn(async move {
+                            let servers = sqlx::query!(
+                                r#"
+                                SELECT s.server_id, s.name_server
+                                FROM servers s
+                                JOIN server_members sm ON s.server_id = sm.server_mem
+                                WHERE sm.user_mem = $1
+                                "#,
+                                user_id
+                            )
+                            .fetch_all(&db_clone)
+                            .await;
+
+                            if let Ok(rows) = servers {
+                                let server_list: Vec<(i32, String)> =
+                                    rows.into_iter()
+                                        .map(|r| (r.server_id, r.name_server))
+                                        .collect();
+
+                                let msg = serde_json::to_string(
+                                    &ServerMessage::ServerList(server_list)
+                                ).unwrap();
+
+                                let _ = sender.send(msg);
+                            }
+                        });
+
                     }
                 }
 
 
 
                 ClientMessage::JoinServer(server_code_input) => {
-                    if let Some(username) = &username {
+                    if let Some(user) = &auth_user {
+                        let user_id = user.user_id;
                         let db = state.db.clone();
-                        let username_clone = username.clone();
+                        //let username_clone = username.clone();
                         let code_clone = server_code_input.clone();
 
                         let result = tokio::spawn(async move {
-                            // get user_id
-                            let user = sqlx::query!(
-                                "SELECT user_id FROM users WHERE username = $1",
-                                username_clone
-                            )
-                            .fetch_one(&db)
-                            .await
-                            .ok()?;
-
-                            // find server by code
+                            
                             let server = sqlx::query!(
                                 "SELECT server_id FROM servers WHERE server_code = $1",
                                 code_clone
@@ -342,7 +349,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                                 VALUES ($1, $2)
                                 ON CONFLICT DO NOTHING
                                 "#,
-                                user.user_id,
+                                user_id,
                                 server.server_id
                             )
                             .execute(&db)
@@ -385,6 +392,48 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                                 .or_insert_with(HashSet::new)
                                 .insert(client_id);
                         }
+
+                        // send updated server list
+                        let sender = {
+                            let state_lock = state.inner.lock().await;
+                            if let Some(client) = state_lock.clients.get(&client_id) {
+                                client.sender.clone()
+                            } else {
+                                return;
+                            }
+                        };
+
+                        let db_clone = state.db.clone();
+                        let user_id = user_id; // already available above
+
+                        tokio::spawn(async move {
+                            let servers = sqlx::query!(
+                                r#"
+                                SELECT s.server_id, s.name_server
+                                FROM servers s
+                                JOIN server_members sm ON s.server_id = sm.server_mem
+                                WHERE sm.user_mem = $1
+                                "#,
+                                user_id
+                            )
+                            .fetch_all(&db_clone)
+                            .await;
+
+                            if let Ok(rows) = servers {
+                                let server_list: Vec<(i32, String)> =
+                                    rows.into_iter()
+                                        .map(|r| (r.server_id, r.name_server))
+                                        .collect();
+
+                                let msg = serde_json::to_string(
+                                    &ServerMessage::ServerList(server_list)
+                                ).unwrap();
+
+                                let _ = sender.send(msg);
+                            }
+                        });
+
+
                     }
                 }
 
@@ -521,7 +570,8 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
 
                 // * chat logic *
                 ClientMessage::Chat(message) => {
-                    if let Some(name) = &username {
+                    if let Some(user) = &auth_user {
+                        let name = &user.username;
                         let state_lock = state.inner.lock().await;
 
                         let client = state_lock.clients.get(&client_id).unwrap();
@@ -531,44 +581,32 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                         //save message to DB
                         let db = state.db.clone();
                         let message_clone = message.clone();
-                        let username_clone = name.clone();
+                        //let username_clone = name.clone();
+                        let user_id_clone = user.user_id;
                         let channel_clone = channel.clone();
                         let server_id_clone = server_id;
 
                         tokio::spawn(async move {
-                            // get user_id
-                            let user = sqlx::query!(
-                                "SELECT user_id FROM users WHERE username = $1",
-                            username_clone
+                            let channel_row = sqlx::query!(
+                                "SELECT channel_id FROM channels WHERE channel_name = $1 AND server_channel = $2",
+                                channel_clone,
+                                server_id_clone
                             )
                             .fetch_optional(&db)
                             .await
                             .ok()
                             .flatten();
 
-                            if let Some(user) = user {
-                                // get channel_id
-                                let channel_row = sqlx::query!(
-                                "SELECT channel_id FROM channels WHERE channel_name = $1 AND server_channel = $2",
-                                    channel_clone,
-                                    server_id_clone
+                            if let Some(channel_row) = channel_row {
+                                let _ = sqlx::query!(
+                                    "INSERT INTO messages (channel_mes, user_mes, message_content)
+                                    VALUES ($1, $2, $3)",
+                                    channel_row.channel_id,
+                                    user_id_clone,
+                                    message_clone
                                 )
-                                .fetch_optional(&db)
-                                .await
-                                .ok()
-                                .flatten();
-
-                                if let Some(channel_row) = channel_row {
-                                    let _ = sqlx::query!(
-                                        "INSERT INTO messages (channel_mes, user_mes, message_content)
-                                        VALUES ($1, $2, $3)",
-                                        channel_row.channel_id,
-                                        user.user_id,
-                                        message_clone
-                                    )
                                 .execute(&db)
-                                    .await;
-                                }
+                                .await;
                             }
                         });
 
@@ -803,6 +841,242 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                             }
                         }
                     });
+                }
+
+                ClientMessage::Login { username: login_username, password } => {
+                    let db = state.db.clone();
+                    let sender = tx.clone();
+
+                    // update auth_user in this scope so we can use it after the DB call
+                    let auth_user_ptr = &mut auth_user;
+
+                    // sync DB call to get user by username
+                    let result = sqlx::query!(
+                        "SELECT user_id, username, password_hash FROM users WHERE username = $1",
+                        login_username
+                    )
+                    .fetch_optional(&db)
+                    .await;
+
+                    match result {
+                        Ok(Some(user)) => {
+                            // TEMP: plain text comparison hash later
+                            if user.password_hash == password {
+
+                                
+                                auth_user = Some(AuthUser {
+                                    user_id: user.user_id,
+                                    username: user.username.clone(),
+                                });
+
+                                // add client to state
+                                let mut state_lock = state.inner.lock().await;
+
+                                // get default server (main)
+                                let server_row = sqlx::query!(
+                                    "SELECT server_id FROM servers WHERE name_server = 'main'"
+                                )
+                                .fetch_one(&state.db)
+                                .await
+                                .unwrap();
+
+                                let client = Client {
+                                    user_id: user.user_id,
+                                    username: user.username.clone(),
+                                    sender: tx.clone(),
+                                    server_id: server_row.server_id,
+                                    channel: "general".to_string(),
+                                };
+
+                                state_lock.clients.insert(client_id, client);
+
+                                // add to channel
+                                let server_key = server_row.server_id.to_string();
+
+                                state_lock.servers
+                                    .entry(server_key.clone())
+                                    .or_insert(Server {
+                                        channels: HashMap::new(),
+                                    })
+                                    .channels
+                                    .entry("general".to_string())
+                                    .or_insert_with(HashSet::new)
+                                    .insert(client_id);
+
+                                // send auth success
+                                let msg = serde_json::to_string(
+                                    &ServerMessage::AuthSuccess
+                                ).unwrap();
+                                let _ = sender.send(msg);
+
+                                // send server list
+                                let servers = sqlx::query!(
+                                    r#"
+                                    SELECT s.server_id, s.name_server
+                                    FROM servers s
+                                    INNER JOIN server_members sm ON sm.server_mem = s.server_id
+                                    WHERE sm.user_mem = $1
+                                    "#,
+                                    user.user_id
+                                )
+                                .fetch_all(&state.db)
+                                .await
+                                .unwrap_or_default();
+
+                                let server_list: Vec<(i32, String)> = servers
+                                    .into_iter()
+                                    .map(|s| (s.server_id, s.name_server))
+                                    .collect();
+
+                                let msg = serde_json::to_string(
+                                    &ServerMessage::ServerList(server_list)
+                                ).unwrap();
+
+                                let _ = sender.send(msg);
+
+                            } else {
+                                let msg = serde_json::to_string(
+                                    &ServerMessage::AuthError("Invalid password".to_string())
+                                ).unwrap();
+
+                                let _ = sender.send(msg);
+                            }
+                        }
+
+                        Ok(None) => {
+                            let msg = serde_json::to_string(
+                                &ServerMessage::AuthError("User not found".to_string())
+                            ).unwrap();
+
+                            let _ = sender.send(msg);
+                        }
+
+                        Err(_) => {
+                            let msg = serde_json::to_string(
+                                &ServerMessage::AuthError("Login failed".to_string())
+                            ).unwrap();
+
+                            let _ = sender.send(msg);
+                        }
+                    }
+                }
+
+                ClientMessage::Signup { username: new_username, email, password } => {
+                    let db = state.db.clone();
+                    let sender = tx.clone();
+
+                    // check if username exists
+                    let existing = sqlx::query!(
+                        "SELECT user_id FROM users WHERE username = $1",
+                        new_username
+                    )
+                    .fetch_optional(&db)
+                    .await;
+
+                    if let Ok(Some(_)) = existing {
+                        let msg = serde_json::to_string(
+                            &ServerMessage::AuthError("Username already exists".to_string())
+                        ).unwrap();
+
+                        let _ = sender.send(msg);
+                        return;
+                    }
+
+                    // insert new user
+                    let inserted = sqlx::query!(
+                        r#"
+                        INSERT INTO users (username, email, password_hash)
+                        VALUES ($1, $2, $3)
+                        RETURNING user_id
+                        "#,
+                        new_username,
+                        email,
+                        password
+                    )
+                    .fetch_one(&db)
+                    .await;
+
+                    match inserted {
+                        Ok(user) => {
+
+                            // TEMP: hash password later
+                            auth_user = Some(AuthUser {
+                                user_id: user.user_id,
+                                username: new_username.clone(),
+                            });
+
+                            // add client state
+                            let mut state_lock = state.inner.lock().await;
+
+                            let server_row = sqlx::query!(
+                                "SELECT server_id FROM servers WHERE name_server = 'main'"
+                            )
+                            .fetch_one(&state.db)
+                            .await
+                            .unwrap();
+
+                            let client = Client {
+                                user_id: user.user_id,
+                                username: new_username.clone(), 
+                                sender: tx.clone(),
+                                server_id: server_row.server_id,
+                                channel: "general".to_string(),
+                            };
+
+                            state_lock.clients.insert(client_id, client);
+
+                            let server_key = server_row.server_id.to_string();
+
+                            state_lock.servers
+                                .entry(server_key.clone())
+                                .or_insert(Server {
+                                    channels: HashMap::new(),
+                                })
+                                .channels
+                                .entry("general".to_string())
+                                .or_insert_with(HashSet::new)
+                                .insert(client_id);
+
+                            // send auth success
+                            let msg = serde_json::to_string(
+                                &ServerMessage::AuthSuccess
+                            ).unwrap();
+                            let _ = sender.send(msg);
+
+                            // send server list
+                            let servers = sqlx::query!(
+                                r#"
+                                SELECT s.server_id, s.name_server
+                                FROM servers s
+                                INNER JOIN server_members sm ON sm.server_mem = s.server_id
+                                WHERE sm.user_mem = $1
+                                "#,
+                                user.user_id
+                            )
+                            .fetch_all(&state.db)
+                            .await
+                            .unwrap_or_default();
+
+                            let server_list: Vec<(i32, String)> = servers
+                                .into_iter()
+                                .map(|s| (s.server_id, s.name_server))
+                                .collect();
+
+                            let msg = serde_json::to_string(
+                                &ServerMessage::ServerList(server_list)
+                            ).unwrap();
+
+                            let _ = sender.send(msg);
+                        }
+
+                        Err(_) => {
+                            let msg = serde_json::to_string(
+                                &ServerMessage::AuthError("Signup failed".to_string())
+                            ).unwrap();
+
+                            let _ = sender.send(msg);
+                        }
+                    }
                 }
 
 

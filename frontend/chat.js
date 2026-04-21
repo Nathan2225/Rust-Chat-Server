@@ -1,7 +1,7 @@
 //chat
 const socket = new WebSocket("ws://localhost:3000/ws");
 
-let usernameSet = false;
+let isAuthenticated = false;
 let currentChannel = "general";
 let currentServerId = null;
 
@@ -9,12 +9,7 @@ socket.onopen = () => {
     console.log("Connected to server");
 };
 
-document.getElementById("usernameInput")
-.addEventListener("keypress", function(e) {
-    if (e.key === "Enter") {
-        setUsername();
-    }
-});
+
 
 document.getElementById("roomInput")
 .addEventListener("keypress", function(e) {
@@ -36,6 +31,24 @@ socket.onmessage = (event) => {
     // parse JSON
     try {
         const data = JSON.parse(event.data);
+
+        if (data.type === "AuthSuccess") {
+            isAuthenticated = true;
+
+            document.getElementById("authSection").style.display = "none";
+            document.getElementById("chatSection").style.display = "flex";
+
+            // load initial data
+            socket.send(JSON.stringify({ type: "GetServers" }));
+            socket.send(JSON.stringify({ type: "GetRooms" }));
+
+            return;
+        }
+
+        if (data.type === "AuthError") {
+            alert(data.data);
+            return;
+        }
 
         // handle room list updates
         if (data.type === "RoomList") {
@@ -77,37 +90,37 @@ socket.onmessage = (event) => {
     messages.scrollTop = messages.scrollHeight;
 };
 
-// set username
-function setUsername() {
 
-    const input = document.getElementById("usernameInput");
-    const username = input.value.trim();
+function login() {
+    const username = document.getElementById("loginUsername").value.trim();
+    const password = document.getElementById("loginPassword").value.trim();
 
-    if (username === "") return;
-
-    socket.send(JSON.stringify({
-        type: "SetUsername",
-        data: username
-    }));
-
-    usernameSet = true;
-
-    socket.send(JSON.stringify({ type: "GetServers" }));
-    socket.send(JSON.stringify({ type: "GetRooms" }));
+    if (!username || !password) return;
 
     socket.send(JSON.stringify({
-        type: "GetServers"
+        type: "Login",
+        data: { username, password }
     }));
-
-    document.getElementById("usernameSection").style.display = "none";
-    document.getElementById("chatSection").style.display = "flex";
-    //document.getElementById("roomSection").style.display = "flex";
 }
+
+function signup() {
+    const username = document.getElementById("signupUsername").value.trim();
+    const email = document.getElementById("signupEmail").value.trim();
+    const password = document.getElementById("signupPassword").value.trim();
+
+    if (!username || !email || !password) return;
+
+    socket.send(JSON.stringify({
+        type: "Signup",
+        data: { username, email, password }
+    }));
+}
+
 
 // join room
 function joinRoom() {
 
-    if (!usernameSet) return;
+    if (!isAuthenticated) return;
 
     const input = document.getElementById("roomInput");
     const channel = input.value.trim();
@@ -135,7 +148,7 @@ function joinRoom() {
 // send chat message
 function sendMessage() {
 
-    if (!usernameSet || socket.readyState !== WebSocket.OPEN) return;
+    if (!isAuthenticated || socket.readyState !== WebSocket.OPEN) return;
 
     const input = document.getElementById("msg");
     const text = input.value.trim();
@@ -179,7 +192,7 @@ function updateRoomList(channels) {
 // join room when clicking from sidebar
 function joinRoomFromSidebar(channelName) {
 
-    if (!usernameSet) return;
+    if (!isAuthenticated) return;
 
     socket.send(JSON.stringify({
         type: "JoinRoom",
@@ -277,7 +290,7 @@ function updateServerList(servers) {
 
 function switchServer(serverId) {
 
-    if (!usernameSet) return;
+    if (!isAuthenticated) return;
 
     socket.send(JSON.stringify({
         type: "SwitchServer",
