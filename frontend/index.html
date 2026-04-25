@@ -20,7 +20,7 @@
             <button onclick="createServer()">+</button>
 
             <input id="serverCodeInput" placeholder="Join code">
-            <button onclick="joinServer()">→</button>
+            <button onclick="joinServer()">➜</button>
         </div>
     </div>
 
@@ -31,7 +31,7 @@
 
         <div id="createRoomSection">
             <input id="roomInput" placeholder="New channel name">
-            <button onclick="joinRoom()">Create</button>
+            <button onclick="joinRoom()">✔</button>
         </div>
     </div>
 
@@ -39,9 +39,15 @@
     <div id="main">
 
         <header>
-            <h2 id="currentServer">Main Server</h2>
-            <div id="roomInfo">channel: <b id="currentRoom">general</b></div>
-            <button onclick="logout()">Logout</button>
+            <div class="left">
+                <h2 id="currentServer"> </h2>
+                <div id="roomInfo">
+                    <b id="currentRoom"> </b><br>
+                    <span id="currentServerCode"> </span>
+                </div>
+            </div>
+
+            <button id="logoutBtn" onclick="logout()">Logout</button>
         </header>
 
         <!-- username -->

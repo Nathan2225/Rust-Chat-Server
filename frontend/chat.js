@@ -4,6 +4,7 @@ const socket = new WebSocket("ws://localhost:3000/ws");
 let isAuthenticated = false;
 let currentChannel = "general";
 let currentServerId = null;
+let serverMap = {}; 
 
 socket.onopen = () => {
     console.log("Connected to server");
@@ -146,7 +147,9 @@ function logout() {
     document.getElementById("serverList").innerHTML = "";
 
     // reset current labels
-    document.getElementById("currentRoom").textContent = "general";
+    document.getElementById("currentRoom").textContent = "";
+    document.getElementById("currentServer").textContent = "";
+    document.getElementById("currentServerCode").textContent = "";
 
     // clear input fields
     document.getElementById("loginUsername").value = "";
@@ -311,8 +314,17 @@ function updateServerList(servers) {
 
     list.innerHTML = "";
 
+    serverMap = {}; // reset
+
+    // servers now expected as [id, name, code]
+    servers.forEach(([id, name, code]) => {
+        serverMap[id] = { name, code };
+    });
+
     if (servers.length > 0 && currentServerId === null) {
         currentServerId = servers[0][0];
+
+        updateHeaderServer(); 
 
         socket.send(JSON.stringify({
             type: "SwitchServer",
@@ -347,6 +359,8 @@ function switchServer(serverId) {
     }));
 
     currentServerId = serverId;
+
+    updateHeaderServer(); 
     
     setTimeout(() => {
         socket.send(JSON.stringify({ type: "GetRooms" }));
@@ -355,13 +369,23 @@ function switchServer(serverId) {
     document.getElementById("messages").innerHTML = "";
 
     currentChannel = "general";
-
     document.getElementById("currentRoom").textContent = "general";
 
-    document.getElementById("messages").innerHTML = "";
-
-    // request updated channel list
     socket.send(JSON.stringify({
         type: "GetRooms"
     }));
+}
+
+function updateHeaderServer() {
+
+    const serverNameEl = document.getElementById("currentServer");
+    const serverCodeEl = document.getElementById("currentServerCode");
+
+    if (!serverMap[currentServerId]) return;
+
+    serverNameEl.textContent = serverMap[currentServerId].name;
+
+    if (serverCodeEl) {
+        serverCodeEl.textContent = "invite code: " + (serverMap[currentServerId].code || "N/A");
+    }
 }
