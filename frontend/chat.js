@@ -1,5 +1,13 @@
 //chat
-const socket = new WebSocket("ws://localhost:3000/ws");
+const isLocal =
+    window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1";
+
+const socket = new WebSocket(
+    isLocal
+        ? "ws://localhost:3000/ws"
+        : "wss://" + window.location.host + "/ws"
+);
 
 let isAuthenticated = false;
 let currentChannel = "general";

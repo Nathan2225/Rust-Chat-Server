@@ -1477,7 +1477,8 @@ async fn main() {
         .with_state(state);
 
     //server's address
-    let addr = "127.0.0.1:3000";
+    let addr = "0.0.0.0:3000";
+    //let addr = "127.0.0.1:3000";
 
     println!("Server running at http://{}", addr);
 
