@@ -38,6 +38,8 @@ use tokio::net::TcpListener;
 // for serializing and deserializing JSON messages
 use serde::{Deserialize, Serialize};
 
+const MAX_MESSAGE_LENGTH: usize = 512;
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", content = "data")]
 enum ClientMessage {
@@ -127,6 +129,15 @@ async fn ws_handler(
     ws.on_upgrade(move |socket| handle_socket(socket, state))
 }
 
+fn is_valid_username(username: &str) -> bool {
+    let len = username.len();
+
+    if len < 3 || len > 20 {
+        return false;
+    }
+
+    username.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
 
 
 
@@ -586,6 +597,17 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
 
                 // * chat logic *
                 ClientMessage::Chat(message) => {
+                    if message.len() > MAX_MESSAGE_LENGTH {
+                        if let Some(client) = state.inner.lock().await.clients.get(&client_id) {
+                            let _ = client.sender.send(
+                                serde_json::to_string(
+                                    &ServerMessage::AuthError("Message too long (limit: 512 chars)".to_string())
+                                ).unwrap()
+                            );
+                        }
+                        return;
+                    }
+
                     if let Some(user) = &auth_user {
 
                         let server_id = {
@@ -961,24 +983,37 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
 
                                 // get default server (main)
                                 let server_row = sqlx::query!(
-                                    "SELECT server_id FROM servers WHERE name_server = 'main'"
+                                    r#"
+                                    SELECT s.server_id
+                                    FROM servers s
+                                    INNER JOIN server_members sm ON sm.server_mem = s.server_id
+                                    WHERE sm.user_mem = $1
+                                    LIMIT 1
+                                    "#,
+                                    user.user_id
                                 )
-                                .fetch_one(&state.db)
+                                .fetch_optional(&state.db)
                                 .await
-                                .unwrap();
+                                .ok()
+                                .flatten();
+
+                                let server_id = match server_row {
+                                    Some(s) => s.server_id,
+                                    None => return,
+                                };
 
                                 let client = Client {
                                     user_id: user.user_id,
                                     username: user.username.clone(),
                                     sender: tx.clone(),
-                                    server_id: server_row.server_id,
+                                    server_id,
                                     channel: "general".to_string(),
                                 };
 
                                 state_lock.clients.insert(client_id, client);
 
                                 // add to channel
-                                let server_key = server_row.server_id.to_string();
+                                let server_key = server_id.to_string();
 
                                 state_lock.servers
                                     .entry(server_key.clone())
@@ -1067,6 +1102,15 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                     let db = state.db.clone();
                     let sender = tx.clone();
 
+                    if !is_valid_username(&new_username) {
+                        let msg = serde_json::to_string(
+                            &ServerMessage::AuthError("Invalid username (3-20 chars, letters/numbers/_)".to_string())
+                        ).unwrap();
+
+                        let _ = sender.send(msg);
+                        return;
+                    }
+
                     // check if username exists
                     let existing = sqlx::query!(
                         "SELECT user_id FROM users WHERE username = $1",
@@ -1109,6 +1153,25 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
 
                     match inserted {
                         Ok(user) => {
+
+                            // add user to main server membership
+                            let main_server = sqlx::query!(
+                                "SELECT server_id FROM servers WHERE name_server = 'main'"
+                            )
+                            .fetch_one(&db)
+                            .await;
+
+                            if let Ok(server) = main_server {
+                                let _ = sqlx::query!(
+                                    "INSERT INTO server_members (user_mem, server_mem)
+                                    VALUES ($1, $2)
+                                    ON CONFLICT DO NOTHING",
+                                user.user_id,
+                                server.server_id
+                                )
+                                .execute(&db)
+                                .await;
+                            }
 
                             auth_user = Some(AuthUser {
                                 user_id: user.user_id,
@@ -1241,17 +1304,30 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                         let mut state_lock = state.inner.lock().await;
 
                         let server_row = sqlx::query!(
-                            "SELECT server_id FROM servers WHERE name_server = 'main'"
+                            r#"
+                            SELECT s.server_id
+                            FROM servers s
+                            INNER JOIN server_members sm ON sm.server_mem = s.server_id
+                            WHERE sm.user_mem = $1
+                            LIMIT 1
+                            "#,
+                            user.user_id
                         )
-                        .fetch_one(&state.db)
+                        .fetch_optional(&state.db)
                         .await
-                        .unwrap();
+                        .ok()
+                        .flatten();
+
+                        let server_id = match server_row {
+                            Some(s) => s.server_id,
+                            None => return, // user has no servers (edge case)
+                        };
 
                         let client = Client {
                             user_id: user.user_id,
                             username: user.username.clone(),
                             sender: tx.clone(),
-                            server_id: server_row.server_id,
+                            server_id,
                             channel: "general".to_string(),
                         };
 
@@ -1335,11 +1411,13 @@ fn broadcast_to_channel(
 
 // helper to send updated room list to all clients
 fn broadcast_room_list(state: &ServerState) {
-    let channels: Vec<String> = if let Some(server) = state.servers.get("main") {
-        server.channels.keys().cloned().collect()
-    } else {
-        vec![]
-    };
+    let mut channels: Vec<String> = Vec::new();
+
+    for server in state.servers.values() {
+        for channel in server.channels.keys() {
+            channels.push(channel.clone());
+        }
+    }
 
     let msg = serde_json::to_string(
         &ServerMessage::RoomList(channels)
