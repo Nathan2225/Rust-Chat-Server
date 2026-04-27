@@ -117,7 +117,7 @@ struct Server {
 
 //confirm running
 async fn root() -> &'static str {
-    "Chat Server is Running"
+    "please visit https://thiscord-app.onrender.com/"
 }
 
 // handeler for client connection with web socket
