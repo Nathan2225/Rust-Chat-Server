@@ -6,7 +6,8 @@ const isLocal =
 const socket = new WebSocket(
     isLocal
         ? "ws://localhost:3000/ws"
-        : "wss://" + window.location.host + "/ws"
+        : "wss://thiscord-chat.onrender.com/ws"
+        
 );
 
 let isAuthenticated = false;
