@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                            SELECT channel_name\n                            FROM channels\n                            WHERE server_channel = $1\n                            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "channel_name",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "7105cbeb6f96ee8a2b7aba824e9f05c98716b48719221bde5ab8af1ff10cbe01"
+}

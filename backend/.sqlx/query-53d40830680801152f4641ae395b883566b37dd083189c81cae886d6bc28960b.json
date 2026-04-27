@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                                INSERT INTO server_members (user_mem, server_mem)\n                                VALUES ($1, $2)\n                                ON CONFLICT DO NOTHING\n                                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "53d40830680801152f4641ae395b883566b37dd083189c81cae886d6bc28960b"
+}

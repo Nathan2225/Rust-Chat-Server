@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET session_token = $1, session_expires = NOW() + INTERVAL '7 days' WHERE user_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "163ab92263efc4d45227d702b0b1da0048d8c982953ad81dc56d0c5d1d872544"
+}

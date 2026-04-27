@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                                    SELECT s.server_id\n                                    FROM servers s\n                                    INNER JOIN server_members sm ON sm.server_mem = s.server_id\n                                    WHERE sm.user_mem = $1\n                                    LIMIT 1\n                                    ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "server_id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "526a84cdc72744c25cc0bd3fb6a1f9a4339d6bff0bdc207b00ed7df0277a9f24"
+}

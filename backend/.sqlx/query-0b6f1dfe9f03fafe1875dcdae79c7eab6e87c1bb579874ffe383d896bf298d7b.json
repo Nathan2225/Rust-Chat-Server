@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                            SELECT m.message_content, u.username\n                            FROM messages m\n                            JOIN users u ON m.user_mes = u.user_id\n                            JOIN channels c ON m.channel_mes = c.channel_id\n                            WHERE c.channel_name = 'general' AND c.server_channel = $1\n                            ORDER BY m.created_at ASC\n                            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "message_content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "username",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "0b6f1dfe9f03fafe1875dcdae79c7eab6e87c1bb579874ffe383d896bf298d7b"
+}

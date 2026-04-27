@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO messages (channel_mes, user_mes, message_content)\n                                    VALUES ($1, $2, $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "db050b8cddbf7953340d5ddd71b8c526707ff8918c8d1c50011d59c7a06a7072"
+}

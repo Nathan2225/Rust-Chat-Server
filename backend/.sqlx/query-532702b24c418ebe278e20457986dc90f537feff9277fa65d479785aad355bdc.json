@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                            INSERT INTO servers (name_server, owner_id, server_code)\n                            VALUES ($1, $2, $3)\n                            RETURNING server_id\n                            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "server_id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Int4",
+        "Varchar"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "532702b24c418ebe278e20457986dc90f537feff9277fa65d479785aad355bdc"
+}
