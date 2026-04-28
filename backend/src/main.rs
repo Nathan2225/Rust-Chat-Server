@@ -600,6 +600,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                 ClientMessage::GetMembers => {
                     if let Some(user) = &auth_user {
 
+                        // ensure user belongs to this server
                         let server_id = {
                             let state_lock = state.inner.lock().await;
                             match state_lock.clients.get(&client_id) {
