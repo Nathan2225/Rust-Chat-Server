@@ -65,11 +65,11 @@ enum ClientMessage {
 #[serde(tag = "type", content = "data")]
 enum ServerMessage {
     RoomList(Vec<String>),
-    ServerList(Vec<(i32, String, String)>),
+    ServerList(Vec<(i32, String, String, i32)>), //server_id, name, server code, owner_id
     MemberList(Vec<(String, String)>), 
 
     // auth
-    AuthSuccess { token: String, username: String },
+    AuthSuccess { token: String, username: String, user_id: i32 },
     AuthError(String),
 }
 
@@ -306,7 +306,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                         tokio::spawn(async move {
                             let servers = sqlx::query!(
                                 r#"
-                                SELECT s.server_id, s.name_server, s.server_code
+                                SELECT s.server_id, s.name_server, s.server_code, s.owner_id
                                 FROM servers s
                                 JOIN server_members sm ON s.server_id = sm.server_mem
                                 WHERE sm.user_mem = $1
@@ -317,9 +317,14 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                             .await;
 
                             if let Ok(rows) = servers {
-                                let server_list: Vec<(i32, String, String)> =
+                                let server_list: Vec<(i32, String, String, i32)> =
                                     rows.into_iter()
-                                        .map(|r| (r.server_id, r.name_server, r.server_code.unwrap_or_default()))
+                                        .map(|r| (
+                                            r.server_id,
+                                            r.name_server,
+                                            r.server_code.unwrap_or_default(),
+                                            r.owner_id
+                                        ))
                                         .collect();
 
                                 let msg = serde_json::to_string(
@@ -419,7 +424,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                         tokio::spawn(async move {
                             let servers = sqlx::query!(
                                 r#"
-                                SELECT s.server_id, s.name_server, s.server_code
+                                SELECT s.server_id, s.name_server, s.server_code, s.owner_id
                                 FROM servers s
                                 JOIN server_members sm ON s.server_id = sm.server_mem
                                 WHERE sm.user_mem = $1
@@ -430,9 +435,14 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                             .await;
 
                             if let Ok(rows) = servers {
-                                let server_list: Vec<(i32, String, String)> =
+                                let server_list: Vec<(i32, String, String, i32)> =
                                     rows.into_iter()
-                                        .map(|r| (r.server_id, r.name_server, r.server_code.unwrap_or_default()))
+                                        .map(|r| (
+                                            r.server_id,
+                                            r.name_server,
+                                            r.server_code.unwrap_or_default(),
+                                            r.owner_id
+                                        ))
                                         .collect();
 
                                 let msg = serde_json::to_string(
@@ -973,7 +983,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                                 // get servers user belongs to
                                 let servers = sqlx::query!(
                                     r#"
-                                    SELECT s.server_id, s.name_server, s.server_code
+                                    SELECT s.server_id, s.name_server, s.server_code, s.owner_id
                                     FROM servers s
                                     JOIN server_members sm ON s.server_id = sm.server_mem
                                     WHERE sm.user_mem = $1
@@ -984,9 +994,14 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                                 .await;
 
                                 if let Ok(rows) = servers {
-                                    let server_list: Vec<(i32, String, String)> =
+                                    let server_list: Vec<(i32, String, String, i32)> =
                                         rows.into_iter()
-                                            .map(|r| (r.server_id, r.name_server, r.server_code.unwrap_or_default()))
+                                            .map(|r| (
+                                                r.server_id,
+                                                r.name_server,
+                                                r.server_code.unwrap_or_default(),
+                                                r.owner_id
+                                            ))
                                             .collect();
 
                                     let msg = serde_json::to_string(
@@ -1107,6 +1122,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                                     &ServerMessage::AuthSuccess { 
                                         token: token.clone(),
                                         username: user.username.clone(),
+                                        user_id: user.user_id,
                                     }
                                 ).unwrap();
                                 let _ = sender.send(msg);
@@ -1114,7 +1130,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                                 // send server list
                                 let servers = sqlx::query!(
                                     r#"
-                                    SELECT s.server_id, s.name_server, s.server_code
+                                    SELECT s.server_id, s.name_server, s.server_code, s.owner_id
                                     FROM servers s
                                     INNER JOIN server_members sm ON sm.server_mem = s.server_id
                                     WHERE sm.user_mem = $1
@@ -1125,9 +1141,9 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                                 .await
                                 .unwrap_or_default();
 
-                                let server_list: Vec<(i32, String, String)> = servers
+                                let server_list: Vec<(i32, String, String, i32)> = servers
                                     .into_iter()
-                                    .map(|s| (s.server_id, s.name_server, s.server_code.unwrap_or_default()))
+                                    .map(|s| (s.server_id, s.name_server, s.server_code.unwrap_or_default(), s.owner_id))
                                     .collect();
 
                                 let msg = serde_json::to_string(
@@ -1295,6 +1311,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                                 &ServerMessage::AuthSuccess { 
                                     token: token.clone(),
                                     username: new_username.clone(),
+                                    user_id: user.user_id,
                                 }
                             ).unwrap();
                             let _ = sender.send(msg);
@@ -1302,7 +1319,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                             // send server list
                             let servers = sqlx::query!(
                                 r#"
-                                SELECT s.server_id, s.name_server, s.server_code
+                                SELECT s.server_id, s.name_server, s.server_code, s.owner_id
                                 FROM servers s
                                 INNER JOIN server_members sm ON sm.server_mem = s.server_id
                                 WHERE sm.user_mem = $1
@@ -1313,9 +1330,9 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                             .await
                             .unwrap_or_default();
 
-                            let server_list: Vec<(i32, String, String)> = servers
+                            let server_list: Vec<(i32, String, String, i32)> = servers
                                 .into_iter()
-                                .map(|s| (s.server_id, s.name_server, s.server_code.unwrap_or_default()))
+                                .map(|s| (s.server_id, s.name_server, s.server_code.unwrap_or_default(), s.owner_id))
                                 .collect();
 
                             let msg = serde_json::to_string(
@@ -1405,6 +1422,7 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                             &ServerMessage::AuthSuccess { 
                                 token: new_token.clone(),
                                 username: user.username.clone(),
+                                user_id: user.user_id,
                             }
                         ).unwrap();
 

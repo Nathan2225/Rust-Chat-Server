@@ -56,6 +56,7 @@ socket.onmessage = (event) => {
 
             localStorage.setItem("token", data.data.token);
             localStorage.setItem("username", data.data.username);
+            localStorage.setItem("user_id", data.data.user_id);
 
             document.getElementById("authSection").style.display = "none";
             document.getElementById("chatSection").style.display = "flex";
@@ -71,6 +72,8 @@ socket.onmessage = (event) => {
 
             socket.send(JSON.stringify({ type: "GetServers" }));
             socket.send(JSON.stringify({ type: "GetRooms" }));
+
+            setTimeout(updateCreateRoomVisibility, 100);
 
             return;
         }
@@ -97,6 +100,8 @@ socket.onmessage = (event) => {
             updateMemberList(data.data);
             return;
         }
+
+        
 
 
     } catch (e) {
@@ -202,6 +207,7 @@ function logout() {
     // toggle UI
     document.getElementById("authSection").style.display = "block";
     document.getElementById("chatSection").style.display = "none";
+    document.getElementById("chatContainer").style.display = "none";
 }
 
 
@@ -354,9 +360,9 @@ function updateServerList(servers) {
 
     serverMap = {}; // reset
 
-    // servers now expected as [id, name, code]
-    servers.forEach(([id, name, code]) => {
-        serverMap[id] = { name, code };
+    // servers now expected as [id, name, code, ownerId]
+    servers.forEach(([id, name, code, ownerId]) => {
+        serverMap[id] = { name, code, ownerId };
     });
 
     if (servers.length > 0 && currentServerId === null) {
@@ -385,6 +391,8 @@ function updateServerList(servers) {
 
         list.appendChild(li);
     });
+
+    updateCreateRoomVisibility();
 }
 
 function switchServer(serverId) {
@@ -413,6 +421,8 @@ function switchServer(serverId) {
     socket.send(JSON.stringify({
         type: "GetRooms"
     }));
+
+    updateCreateRoomVisibility();
 }
 
 // update member list in sidebar
@@ -448,5 +458,20 @@ function updateHeaderServer() {
 
     if (serverCodeEl) {
         serverCodeEl.textContent = "invite code: " + (serverMap[currentServerId].code || "N/A");
+    }
+}
+
+function updateCreateRoomVisibility() {
+    const section = document.getElementById("createRoomSection");
+
+    const currentUserId = parseInt(localStorage.getItem("user_id"));
+    const server = serverMap[currentServerId];
+
+    if (!server) return;
+
+    if (server.ownerId === currentUserId) {
+        section.style.display = "flex"; // show
+    } else {
+        section.style.display = "none"; // hide
     }
 }
