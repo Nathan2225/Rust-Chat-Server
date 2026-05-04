@@ -29,6 +29,16 @@ socket.onopen = () => {
 };
 
 
+window.addEventListener("load", () => {
+    const token = localStorage.getItem("token");
+
+    if (token) {
+        // hide login while resuming session
+        document.getElementById("authSection").style.display = "none";
+    }
+});
+
+
 
 document.getElementById("roomInput")
 .addEventListener("keypress", function(e) {
@@ -58,20 +68,24 @@ socket.onmessage = (event) => {
             localStorage.setItem("username", data.data.username);
             localStorage.setItem("user_id", data.data.user_id);
 
+            const savedServerId = localStorage.getItem("currentServerId");
+            if (savedServerId) {
+                currentServerId = parseInt(savedServerId);
+            }
+
             document.getElementById("authSection").style.display = "none";
             document.getElementById("chatSection").style.display = "flex";
+            document.getElementById("chatContainer").style.display = "flex";
 
-            document.getElementById("currentUser").textContent =
-            localStorage.getItem("username");
+            document.getElementById("currentUser").textContent = localStorage.getItem("username");
 
             document.getElementById("serverSidebar").style.display = "flex";
             document.getElementById("sidebar").style.display = "flex";
-
-            socket.send(JSON.stringify({ type: "GetMembers" }));
             document.getElementById("memberSidebar").style.display = "flex";
 
             socket.send(JSON.stringify({ type: "GetServers" }));
             socket.send(JSON.stringify({ type: "GetRooms" }));
+            socket.send(JSON.stringify({ type: "GetMembers" }));
 
             setTimeout(updateCreateRoomVisibility, 100);
 
@@ -360,16 +374,24 @@ function updateServerList(servers) {
 
     serverMap = {}; // reset
 
-    // servers now expected as [id, name, code, ownerId]
+    // expected: [id, name, code, ownerId]
     servers.forEach(([id, name, code, ownerId]) => {
         serverMap[id] = { name, code, ownerId };
     });
 
-    if (servers.length > 0 && currentServerId === null) {
+    if (
+        servers.length > 0 &&
+        (!currentServerId || !serverMap[currentServerId])
+    ) {
         currentServerId = servers[0][0];
+        localStorage.setItem("currentServerId", currentServerId);
+    }
 
-        updateHeaderServer(); 
+    // update header with current server name and invite code
+    updateHeaderServer();
 
+    // tell backend to switch to current server (if any)
+    if (currentServerId) {
         socket.send(JSON.stringify({
             type: "SwitchServer",
             data: currentServerId
@@ -381,9 +403,7 @@ function updateServerList(servers) {
 
         li.textContent = name;
 
-        if (id === currentServerId) {
-            li.style.backgroundColor = "#5865f2";
-        }
+        
 
         li.onclick = () => {
             switchServer(id);
@@ -405,6 +425,7 @@ function switchServer(serverId) {
     }));
 
     currentServerId = serverId;
+    localStorage.setItem("currentServerId", serverId);
 
     updateHeaderServer(); 
     

@@ -44,7 +44,6 @@ const MAX_MESSAGE_LENGTH: usize = 512;
 #[serde(tag = "type", content = "data")]
 enum ClientMessage {
     // existing
-    //SetUsername(String),
     Chat(String),
     JoinRoom(String),
     GetRooms, 
@@ -185,10 +184,10 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
         if let Ok(msg) = serde_json::from_str::<ClientMessage>(&text) {
 
 
-            // blocks everything except Login/Signup from working if not authenticated
+            // blocks everything except Login/Signup if not authenticated
             if auth_user.is_none() {
                 match &msg {
-                    ClientMessage::Login { .. } | ClientMessage::Signup { .. } => {}
+                    ClientMessage::Login { .. } | ClientMessage::Signup { .. } | ClientMessage::ResumeSession { .. } => {}
                     _ => {
                         let msg = serde_json::to_string(
                             &ServerMessage::AuthError("Please log in first".to_string())
@@ -1427,6 +1426,36 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
                         ).unwrap();
 
                         let _ = tx.send(msg);
+
+                        // send server list
+                        let servers = sqlx::query!(
+                        r#"
+                        SELECT s.server_id, s.name_server, s.server_code, s.owner_id
+                        FROM servers s
+                        INNER JOIN server_members sm ON sm.server_mem = s.server_id
+                        WHERE sm.user_mem = $1
+                        "#,
+                        user.user_id
+                    )
+                    .fetch_all(&db)
+                    .await
+                    .unwrap_or_default();
+
+                    let server_list: Vec<(i32, String, String, i32)> = servers
+                        .into_iter()
+                        .map(|s| (
+                            s.server_id,
+                            s.name_server,
+                            s.server_code.unwrap_or_default(),
+                            s.owner_id
+                        ))
+                        .collect();
+
+                    let msg = serde_json::to_string(
+                        &ServerMessage::ServerList(server_list)
+                    ).unwrap();
+
+                    let _ = tx.send(msg);
                     }
                 }
 
