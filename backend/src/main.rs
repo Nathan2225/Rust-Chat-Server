@@ -141,6 +141,15 @@ fn is_valid_username(username: &str) -> bool {
     username.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
+// message restraint
+fn is_valid_message(msg: &str) -> bool {
+    if msg.len() > MAX_MESSAGE_LENGTH {
+        return false;
+    }
+
+    // block <> to prevent basic HTML injection
+    !msg.contains('<') && !msg.contains('>')
+}
 
 
 // * web socket logic *
@@ -707,11 +716,13 @@ async fn handle_socket(stream: WebSocket, state: AppState) {
 
                 // * chat logic *
                 ClientMessage::Chat(message) => {
-                    if message.len() > MAX_MESSAGE_LENGTH {
+                    if !is_valid_message(&message) {
                         if let Some(client) = state.inner.lock().await.clients.get(&client_id) {
                             let _ = client.sender.send(
                                 serde_json::to_string(
-                                    &ServerMessage::AuthError("Message too long (limit: 512 chars)".to_string())
+                                    &ServerMessage::AuthError(
+                                        "Invalid message (limit of 512 characters + no invalid characters)".to_string()
+                                    )
                                 ).unwrap()
                             );
                         }
